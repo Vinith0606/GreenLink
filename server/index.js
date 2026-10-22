@@ -927,7 +927,7 @@ app.get('/api/locations/farmers', requireRoles('consumer'), async (req, res) => 
     const farmers = await all(
       `SELECT id, name, farm_name, phone, lat, lng, address, city, state, pincode, certificate_status, rating
        FROM users WHERE role = 'farmer' AND account_status != 'suspended'
-       ORDER BY name COLLATE NOCASE`
+       ORDER BY LOWER(name)`
     )
     res.json({ farmers: farmers.map((farmer) => ({ ...farmer, name: farmer.farm_name || farmer.name, certificateStatus: farmer.certificate_status })) })
   } catch (error) {
@@ -941,7 +941,7 @@ app.get('/api/locations/delivery', requireRoles('farmer'), async (req, res) => {
     const agents = await all(
       `SELECT id, name, phone, lat, lng, account_status, availability_status
        FROM users WHERE role = 'delivery' AND account_status != 'suspended'
-       ORDER BY name COLLATE NOCASE`
+       ORDER BY LOWER(name)`
     )
     res.json({ agents })
   } catch (error) {
@@ -980,8 +980,8 @@ app.get('/api/admin/stats', requireRoles('admin'), async (req, res) => {
     const orderRow = await get(`SELECT COUNT(*) AS totalOrders,
       SUM(CASE WHEN status IN ('completed', 'delivered') THEN 1 ELSE 0 END) AS completedOrders,
       SUM(CASE WHEN delivery_agent_id IS NOT NULL THEN 1 ELSE 0 END) AS totalDeliveries,
-      IFNULL(SUM(CASE WHEN status IN ('completed', 'delivered') THEN total ELSE 0 END), 0) AS revenue,
-      IFNULL(SUM(CASE WHEN payment_status = 'paid' THEN total ELSE 0 END), 0) AS totalPayments FROM orders`)
+      COALESCE(SUM(CASE WHEN status IN ('completed', 'delivered') THEN total ELSE 0 END), 0) AS revenue,
+      COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN total ELSE 0 END), 0) AS totalPayments FROM orders`)
     const productRow = await get('SELECT COUNT(*) AS totalProducts FROM products')
     const verifiedFarmerRow = await get("SELECT COUNT(*) AS verifiedFarmers FROM users WHERE role = 'farmer' AND certificate_status = 'verified'")
     const verificationRow = await get("SELECT COUNT(*) AS pendingVerifications FROM users WHERE role = 'farmer' AND certificate_status IN ('pending', 'rejected')")
