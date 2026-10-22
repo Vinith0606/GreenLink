@@ -1819,7 +1819,7 @@ app.get('/api/orders', async (req, res) => {
       orders = await all('SELECT * FROM orders WHERE farmer_id = ? ORDER BY created_at DESC', [userId])
     } else if (role === 'delivery') {
       orders = await all(
-        'SELECT * FROM orders WHERE delivery_agent_id = ? OR (status = "accepted" AND delivery_agent_id IS NULL) ORDER BY created_at DESC',
+        "SELECT * FROM orders WHERE delivery_agent_id = ? OR (status = 'accepted' AND delivery_agent_id IS NULL) ORDER BY created_at DESC",
         [userId]
       )
     } else {
