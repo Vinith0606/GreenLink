@@ -1,0 +1,257 @@
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import type { UserRole, CartItem, Product, Location } from '@/types'
+import api from '@/services/api'
+import { disconnectSocket } from '@/services/socket'
+
+interface AuthProfile {
+  id?: string
+  email: string
+  phone: string
+  farmName?: string
+  description?: string
+  avatar?: string
+  certificateStatus?: 'verified' | 'pending' | 'rejected' | 'expired' | 'not_uploaded'
+  location?: Location
+}
+
+interface AuthContextType {
+  userId?: string
+  role: UserRole | null
+  userName: string
+  userEmail: string
+  userPhone: string
+  userLocation?: Location
+  farmName: string
+  userDescription: string
+  userAvatar: string
+  certificateStatus: 'verified' | 'pending' | 'rejected' | 'expired' | 'not_uploaded'
+  login: (role: UserRole, name?: string, profile?: Partial<AuthProfile>) => void
+  updateProfile: (name: string, profileData: Partial<AuthProfile>) => void
+  logout: () => void
+  isAuthenticated: boolean
+}
+
+interface CartContextType {
+  items: CartItem[]
+  wishlist: Product[]
+  addItem: (product: Product, qty?: number) => void
+  removeItem: (productId: string) => void
+  updateQuantity: (productId: string, qty: number) => void
+  toggleWishlist: (product: Product) => void
+  clearCart: () => void
+  total: number
+  itemCount: number
+}
+
+const AuthContext = createContext<AuthContextType | null>(null)
+const CartContext = createContext<CartContextType | null>(null)
+
+const emptyProfile: AuthProfile = {
+  email: '',
+  phone: '',
+  location: undefined,
+}
+
+function getStoredProfile(): AuthProfile {
+  if (typeof window === 'undefined') return emptyProfile
+
+  try {
+    const raw = localStorage.getItem('greenlink_profile')
+    return raw ? { ...emptyProfile, ...JSON.parse(raw) } : emptyProfile
+  } catch {
+    return emptyProfile
+  }
+}
+
+function getStoredRole(): UserRole | null {
+  const storedRole = localStorage.getItem('greenlink_role')
+  return storedRole && ['farmer', 'consumer', 'delivery', 'admin'].includes(storedRole)
+    ? storedRole as UserRole
+    : null
+}
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [role, setRole] = useState<UserRole | null>(getStoredRole)
+  const storedProfile = getStoredProfile()
+  const [userName, setUserName] = useState(() => localStorage.getItem('greenlink_user') || 'Guest')
+  const [userId, setUserId] = useState<string | undefined>(() => localStorage.getItem('greenlink_user_id') || storedProfile.id)
+  const [profile, setProfile] = useState<AuthProfile>(() => storedProfile)
+
+  useEffect(() => {
+    if (!userId || !role) return
+
+    const refreshProfile = async () => {
+      try {
+        const response = await api.get(`/users/${userId}`)
+        const user = response.data.user
+        const nextProfile = {
+          ...profile,
+          id: String(user.id),
+          email: user.email || '',
+          phone: user.phone || '',
+          farmName: user.farmName || '',
+          description: user.description || '',
+          avatar: user.avatar || '',
+          certificateStatus: user.certificateStatus || (role === 'farmer' ? 'not_uploaded' : 'pending'),
+          location: user.lat != null && user.lng != null ? {
+            lat: user.lat,
+            lng: user.lng,
+            address: user.address || '',
+            city: user.city || '',
+          } : undefined,
+        }
+        setUserName(user.name || 'User')
+        setProfile(nextProfile)
+        localStorage.setItem('greenlink_user', user.name || 'User')
+        localStorage.setItem('greenlink_profile', JSON.stringify(nextProfile))
+      } catch {
+        // Keep the cached session available while the API is offline.
+      }
+    }
+
+    refreshProfile()
+    const interval = window.setInterval(refreshProfile, 15000)
+    return () => window.clearInterval(interval)
+  }, [userId, role])
+
+  const login = (r: UserRole, name = 'User', profileData?: Partial<AuthProfile>) => {
+    const nextProfile = { ...emptyProfile, ...profileData }
+
+    setRole(r)
+    setUserName(name)
+    setProfile(nextProfile)
+    if (nextProfile.id) setUserId(nextProfile.id)
+
+    localStorage.setItem('greenlink_role', r)
+    localStorage.setItem('greenlink_user', name)
+    localStorage.setItem('greenlink_profile', JSON.stringify(nextProfile))
+    if (nextProfile.id) localStorage.setItem('greenlink_user_id', nextProfile.id)
+  }
+
+  const updateProfile = (name: string, profileData: Partial<AuthProfile>) => {
+    const nextProfile = { ...profile, ...profileData }
+    setUserName(name)
+    setProfile(nextProfile)
+    localStorage.setItem('greenlink_user', name)
+    localStorage.setItem('greenlink_profile', JSON.stringify(nextProfile))
+  }
+
+  const logout = () => {
+    disconnectSocket()
+    setRole(null)
+    setUserName('Guest')
+    setUserId(undefined)
+    setProfile(emptyProfile)
+    localStorage.removeItem('greenlink_role')
+    localStorage.removeItem('greenlink_user')
+    localStorage.removeItem('greenlink_user_id')
+    localStorage.removeItem('greenlink_profile')
+    localStorage.removeItem('greenlink_token')
+    localStorage.removeItem('greenlink_wishlist')
+  }
+
+  return (
+    <AuthContext.Provider
+      value={{
+        userId,
+        role,
+        userName,
+        userEmail: profile.email,
+        userPhone: profile.phone,
+        userLocation: profile.location,
+        farmName: profile.farmName || '',
+        userDescription: profile.description || '',
+        userAvatar: profile.avatar || '',
+        certificateStatus: profile.certificateStatus || (role === 'farmer' ? 'not_uploaded' : 'pending'),
+        login,
+        updateProfile,
+        logout,
+        isAuthenticated: !!role,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+export function CartProvider({ children }: { children: ReactNode }) {
+  const { userId } = useAuth()
+  const ownerKey = userId || 'guest'
+  const [items, setItems] = useState<CartItem[]>([])
+  const [wishlist, setWishlist] = useState<Product[]>([])
+  const [wishlistOwner, setWishlistOwner] = useState<string | null>(null)
+  const [cartOwner, setCartOwner] = useState<string | null>(null)
+
+  useEffect(() => {
+    setItems([])
+    setCartOwner(ownerKey)
+  }, [ownerKey])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const savedWishlist = localStorage.getItem(`greenlink_wishlist_${ownerKey}`)
+      setWishlist(savedWishlist ? JSON.parse(savedWishlist) : [])
+    } catch {
+      setWishlist([])
+    }
+    setWishlistOwner(ownerKey)
+  }, [ownerKey])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || wishlistOwner !== ownerKey) return
+    localStorage.setItem(`greenlink_wishlist_${ownerKey}`, JSON.stringify(wishlist))
+  }, [ownerKey, wishlist, wishlistOwner])
+
+  const addItem = (product: Product, qty = 1) => {
+    setItems((prev) => {
+      const existing = prev.find((i) => i.product.id === product.id)
+      if (existing) {
+        return prev.map((i) =>
+          i.product.id === product.id ? { ...i, quantity: i.quantity + qty } : i
+        )
+      }
+      return [...prev, { product, quantity: qty }]
+    })
+  }
+
+  const removeItem = (productId: string) => {
+    setItems((prev) => prev.filter((i) => i.product.id !== productId))
+  }
+
+  const updateQuantity = (productId: string, qty: number) => {
+    if (qty <= 0) return removeItem(productId)
+    setItems((prev) =>
+      prev.map((i) => (i.product.id === productId ? { ...i, quantity: qty } : i))
+    )
+  }
+
+  const toggleWishlist = (product: Product) => {
+    setWishlist((prev) => {
+      const exists = prev.some((item) => item.id === product.id)
+      return exists ? prev.filter((item) => item.id !== product.id) : [...prev, product]
+    })
+  }
+
+  const clearCart = () => setItems([])
+  const total = items.reduce((sum, i) => sum + i.product.price * i.quantity, 0)
+  const itemCount = items.reduce((sum, i) => sum + i.quantity, 0)
+
+  return (
+    <CartContext.Provider value={{ items: cartOwner === ownerKey ? items : [], wishlist: wishlistOwner === ownerKey ? wishlist : [], addItem, removeItem, updateQuantity, toggleWishlist, clearCart, total: cartOwner === ownerKey ? total : 0, itemCount: cartOwner === ownerKey ? itemCount : 0 }}>
+      {children}
+    </CartContext.Provider>
+  )
+}
+
+export function useAuth() {
+  const ctx = useContext(AuthContext)
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider')
+  return ctx
+}
+
+export function useCart() {
+  const ctx = useContext(CartContext)
+  if (!ctx) throw new Error('useCart must be used within CartProvider')
+  return ctx
+}
