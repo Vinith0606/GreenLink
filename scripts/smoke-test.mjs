@@ -10,8 +10,8 @@ if (!response.ok) {
 }
 
 const body = await response.json()
-if (body.ok !== true) {
-  throw new Error('Health check did not return { ok: true }.')
+if (body.ok !== true || !['sqlite', 'postgres'].includes(body.database)) {
+  throw new Error('Health check did not confirm an active database connection.')
 }
 
 const allowOrigin = response.headers.get('access-control-allow-origin')

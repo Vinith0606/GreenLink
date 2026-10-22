@@ -24,7 +24,7 @@ This app is built to simulate a real agricultural commerce workflow across multi
 
 - Frontend: React, TypeScript, Vite
 - Backend: Node.js, Express
-- Database: SQLite
+- Database: PostgreSQL in production, SQLite fallback for local development
 - Real-time updates: Socket.IO
 - Routing: React Router
 - Styling: Tailwind CSS
@@ -188,7 +188,7 @@ Socket.IO client that connects the frontend to backend events for live updates s
 All user interface screens are here. Each folder is dedicated to a role and contains pages for dashboards, orders, profiles, messages, map views, and admin management.
 
 ### server/index.js
-This is the core backend server. It creates the SQLite database, bootstraps tables, serves API routes, and defines the real-time server logic.
+This is the core backend server. It bootstraps the configured PostgreSQL database (or SQLite for local development), serves API routes, and defines the real-time server logic.
 
 ### src/utils/locationService.ts
 Used for geolocation and location-related processing, such as checking proximity between users and farmers or delivery locations.
@@ -298,7 +298,7 @@ The backend exposes APIs under the /api base path.
 
 ## Database
 
-The app uses SQLite and creates the database file at server/greenlink.sqlite on startup.
+When `GREENLINK_DATABASE_URL` is empty, the app uses SQLite and creates `server/greenlink.sqlite` on startup. Production deployments should set `GREENLINK_DATABASE_URL` to managed PostgreSQL.
 
 Major tables include:
 
@@ -407,8 +407,8 @@ Before using this in a production environment:
 - configure unique `ADMIN_PASSWORD` and `GREENLINK_AUTH_SECRET` values
 - configure `GREENLINK_ALLOWED_ORIGINS` as a comma-separated list of the deployed frontend origins
 - use HTTPS and proper hosting
-- consider a stronger database system for large-scale deployment
-- back up SQLite data regularly
+- configure `GREENLINK_DATABASE_URL` with a managed PostgreSQL connection string
+- keep production data in managed PostgreSQL with provider backups enabled
 
 ### Separate frontend deployments
 
@@ -455,7 +455,9 @@ VITE_API_URL=https://<your-render-service>.onrender.com/api
 VITE_APP_ROLE=<farmer|consumer|delivery|admin>
 ```
 
-For Render, set the secret environment variables from the Render dashboard. The included persistent disk keeps SQLite data across deploys; do not remove it while using SQLite. SQLite should be replaced with PostgreSQL before horizontal scaling or high traffic.
+For Render, set the secret environment variables from the Render dashboard. Set `GREENLINK_DATABASE_URL` to a managed PostgreSQL connection string from Neon, Supabase, or another PostgreSQL provider. The backend retains SQLite as a local-development fallback when this variable is empty.
+
+For a free Render deployment, use managed PostgreSQL rather than SQLite. Render's free web service filesystem is ephemeral, so SQLite data would be lost after restarts or redeploys.
 
 Before accepting a deployment, run:
 

@@ -3,6 +3,7 @@ import cors from 'cors'
 import http from 'http'
 import { Server as IOServer } from 'socket.io'
 import sqlite3 from 'sqlite3'
+import pg from 'pg'
 import crypto from 'crypto'
 import fs from 'fs/promises'
 import { AsyncLocalStorage } from 'async_hooks'
@@ -13,6 +14,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const PORT = Number(process.env.PORT || 3001)
 const DB_PATH = process.env.GREENLINK_DB_PATH || path.join(__dirname, 'greenlink.sqlite')
+const DATABASE_URL = process.env.GREENLINK_DATABASE_URL || ''
 const CERTIFICATE_IMAGE_DIR = path.join(__dirname, 'certificates')
 const configuredOrigins = String(process.env.GREENLINK_ALLOWED_ORIGINS || '')
   .split(',')
@@ -38,8 +40,21 @@ if (process.env.NODE_ENV === 'production' && !process.env.ADMIN_PASSWORD) {
 }
 
 const app = express()
-await fs.mkdir(path.dirname(DB_PATH), { recursive: true })
-const db = new sqlite3.Database(DB_PATH)
+const { Pool } = pg
+let db
+let databaseMode
+if (DATABASE_URL) {
+  db = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+    max: Number(process.env.GREENLINK_DATABASE_POOL_SIZE || 5),
+  })
+  databaseMode = 'postgres'
+} else {
+  await fs.mkdir(path.dirname(DB_PATH), { recursive: true })
+  db = new sqlite3.Database(DB_PATH)
+  databaseMode = 'sqlite'
+}
 const allowedRoles = ['farmer', 'consumer', 'delivery', 'admin']
 const addressLabels = new Set(['Home', 'Work', 'Other'])
 const transactionContext = new AsyncLocalStorage()
@@ -151,8 +166,35 @@ const distanceKm = (lat1, lng1, lat2, lng2) => {
 
 const waitForTransaction = () => transactionContext.getStore() ? Promise.resolve() : transactionQueue
 
+const postgresSql = (sql) => {
+  let parameter = 0
+  return sql
+    .replace(/\?/g, () => `$${++parameter}`)
+    .replace(/BEGIN IMMEDIATE/gi, 'BEGIN')
+    .replace(/INTEGER PRIMARY KEY AUTOINCREMENT/gi, 'BIGSERIAL PRIMARY KEY')
+    .replace(/\bBLOB\b/gi, 'BYTEA')
+}
+
+const postgresTableInfo = (tableName) => `
+  SELECT column_name AS name
+  FROM information_schema.columns
+  WHERE table_schema = 'public' AND table_name = '${tableName}'
+  ORDER BY ordinal_position
+`
+
+const queryPostgres = async (sql, params = []) => {
+  const client = transactionContext.getStore()
+  if (client) return client.query(postgresSql(sql), params)
+  return db.query(postgresSql(sql), params)
+}
+
 const run = async (sql, params = []) => {
   await waitForTransaction()
+  if (databaseMode === 'postgres') {
+    const insert = /^\s*INSERT\s+INTO\b/i.test(sql) && !/\bRETURNING\b/i.test(sql)
+    const result = await queryPostgres(insert ? `${sql} RETURNING id` : sql, params)
+    return { id: insert ? result.rows[0]?.id : undefined, changes: result.rowCount }
+  }
   return new Promise((resolve, reject) => {
     db.run(sql, params, function onRun(err) {
       if (err) return reject(err)
@@ -163,6 +205,10 @@ const run = async (sql, params = []) => {
 
 const get = async (sql, params = []) => {
   await waitForTransaction()
+  if (databaseMode === 'postgres') {
+    const result = await queryPostgres(sql, params)
+    return result.rows[0]
+  }
   return new Promise((resolve, reject) => {
     db.get(sql, params, (err, row) => {
       if (err) return reject(err)
@@ -173,6 +219,10 @@ const get = async (sql, params = []) => {
 
 const all = async (sql, params = []) => {
   await waitForTransaction()
+  if (databaseMode === 'postgres') {
+    const result = await queryPostgres(sql, params)
+    return result.rows
+  }
   return new Promise((resolve, reject) => {
     db.all(sql, params, (err, rows) => {
       if (err) return reject(err)
@@ -182,6 +232,23 @@ const all = async (sql, params = []) => {
 }
 
 const withTransaction = async (operation) => {
+  if (databaseMode === 'postgres') {
+    const client = await db.connect()
+    try {
+      await client.query('BEGIN')
+      return await transactionContext.run(client, async () => {
+        const result = await operation()
+        await client.query('COMMIT')
+        return result
+      })
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
   let release
   const previousTransaction = transactionQueue
   transactionQueue = new Promise((resolve) => { release = resolve })
@@ -205,9 +272,7 @@ const withTransaction = async (operation) => {
 }
 
 const initializeDatabase = async () => {
-  await new Promise((resolve, reject) => {
-    db.exec(
-      `
+  const schemaSql = `
           CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             role TEXT NOT NULL,
@@ -359,15 +424,19 @@ const initializeDatabase = async () => {
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id)
           );
-        `,
-      (err) => {
+        `
+  if (databaseMode === 'postgres') {
+    await queryPostgres(schemaSql)
+  } else {
+    await new Promise((resolve, reject) => {
+      db.exec(schemaSql, (err) => {
         if (err) return reject(err)
         resolve()
-      }
-    )
-  })
+      })
+    })
+  }
 
-  const columns = await all('PRAGMA table_info(users)')
+  const columns = await all(databaseMode === 'postgres' ? postgresTableInfo('users') : 'PRAGMA table_info(users)')
   const existing = columns.map((column) => column.name)
   console.log('users table columns:', existing)
 
@@ -443,7 +512,7 @@ const initializeDatabase = async () => {
   if (!existing.includes('pincode')) {
     await run('ALTER TABLE users ADD COLUMN pincode TEXT')
   }
-  const reviewColumns = await all('PRAGMA table_info(reviews)')
+  const reviewColumns = await all(databaseMode === 'postgres' ? postgresTableInfo('reviews') : 'PRAGMA table_info(reviews)')
   const existingReviewColumns = reviewColumns.map((column) => column.name)
   if (!existingReviewColumns.includes('target_type')) await run("ALTER TABLE reviews ADD COLUMN target_type TEXT DEFAULT 'product'")
   if (!existingReviewColumns.includes('target_id')) await run('ALTER TABLE reviews ADD COLUMN target_id INTEGER')
@@ -451,7 +520,7 @@ const initializeDatabase = async () => {
   if (!existingReviewColumns.includes('review_image')) await run('ALTER TABLE reviews ADD COLUMN review_image TEXT')
   await run("UPDATE reviews SET target_type = 'product', target_id = product_id, order_id = 0 WHERE target_type IS NULL OR target_id IS NULL OR order_id IS NULL")
 
-  const reviewIndexes = await all("PRAGMA index_list('reviews')")
+  const reviewIndexes = databaseMode === 'postgres' ? [] : await all("PRAGMA index_list('reviews')")
   const legacyUniqueIndex = reviewIndexes.find((indexInfo) => indexInfo.unique && indexInfo.origin === 'u')
   if (legacyUniqueIndex) {
     const legacyColumns = await all(`PRAGMA index_info('${legacyUniqueIndex.name}')`)
@@ -497,7 +566,7 @@ const initializeDatabase = async () => {
     await run('UPDATE users SET rating = ?, review_count = ? WHERE id = ? AND role = ?', [Number(row.average_rating || 0), Number(row.review_count || 0), row.user_id, 'delivery'])
   }
 
-  const certificateColumns = await all('PRAGMA table_info(certificates)')
+  const certificateColumns = await all(databaseMode === 'postgres' ? postgresTableInfo('certificates') : 'PRAGMA table_info(certificates)')
   if (!certificateColumns.some((column) => column.name === 'certificate_number')) await run('ALTER TABLE certificates ADD COLUMN certificate_number TEXT')
   if (!certificateColumns.some((column) => column.name === 'document_blob')) await run('ALTER TABLE certificates ADD COLUMN document_blob BLOB')
   if (!certificateColumns.some((column) => column.name === 'document_mime_type')) await run('ALTER TABLE certificates ADD COLUMN document_mime_type TEXT')
@@ -511,7 +580,7 @@ const initializeDatabase = async () => {
     if (image) await run('UPDATE certificates SET document_blob = ?, document_mime_type = ? WHERE id = ?', [image.buffer, image.mimeType, certificate.id])
   }
   await run('CREATE UNIQUE INDEX IF NOT EXISTS idx_certificates_certificate_number ON certificates(certificate_number) WHERE certificate_number IS NOT NULL')
-  const orderColumns = await all('PRAGMA table_info(orders)')
+  const orderColumns = await all(databaseMode === 'postgres' ? postgresTableInfo('orders') : 'PRAGMA table_info(orders)')
   const existingOrderColumns = orderColumns.map((column) => column.name)
   if (!existingOrderColumns.includes('delivery_lat')) {
     await run('ALTER TABLE orders ADD COLUMN delivery_lat REAL')
@@ -529,7 +598,7 @@ const initializeDatabase = async () => {
     await run('ALTER TABLE orders ADD COLUMN expected_delivery_at TEXT')
   }
 
-  const messageColumns = await all('PRAGMA table_info(messages)')
+  const messageColumns = await all(databaseMode === 'postgres' ? postgresTableInfo('messages') : 'PRAGMA table_info(messages)')
   const messageColumnNames = messageColumns.map((column) => column.name)
   if (!messageColumnNames.includes('receiver_name')) {
     await run('ALTER TABLE messages ADD COLUMN receiver_name TEXT')
@@ -720,8 +789,14 @@ app.use('/api', (req, res, next) => {
   return authenticateRequest(req, res, next)
 })
 
-app.get('/api/health', (req, res) => {
-  res.json({ ok: true })
+app.get('/api/health', async (req, res) => {
+  try {
+    await get('SELECT 1 AS connected')
+    res.json({ ok: true, database: databaseMode })
+  } catch (error) {
+    console.error('Health check database error:', error)
+    res.status(503).json({ ok: false, message: 'Database unavailable.' })
+  }
 })
 
 app.post('/api/complaints', async (req, res) => {
