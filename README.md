@@ -437,6 +437,44 @@ GREENLINK_ALLOWED_ORIGINS=https://farmer.greenlink.com,https://consumer.greenlin
 
 The backend health check is available at `GET /api/health`. The same configured origins are used for REST requests and Socket.IO connections.
 
+### Vercel + Render launch checklist
+
+This repository includes [`vercel.json`](./vercel.json) for SPA rewrites and [`render.yaml`](./render.yaml) for the backend. Create four Vercel projects from this repository, each with the same build settings and a different `VITE_APP_ROLE`:
+
+| Project | `VITE_APP_ROLE` |
+| --- | --- |
+| GreenLink Farmer | `farmer` |
+| GreenLink Consumer | `consumer` |
+| GreenLink Delivery | `delivery` |
+| GreenLink Admin | `admin` |
+
+For each Vercel project, set:
+
+```text
+VITE_API_URL=https://<your-render-service>.onrender.com/api
+VITE_APP_ROLE=<farmer|consumer|delivery|admin>
+```
+
+For Render, set the secret environment variables from the Render dashboard. The included persistent disk keeps SQLite data across deploys; do not remove it while using SQLite. SQLite should be replaced with PostgreSQL before horizontal scaling or high traffic.
+
+Before accepting a deployment, run:
+
+```powershell
+npm run lint
+npm run build
+npm run smoke-test
+```
+
+For a deployed backend:
+
+```powershell
+$env:SMOKE_API_URL = "https://<your-render-service>.onrender.com/api"
+$env:SMOKE_ORIGIN = "https://<your-vercel-project>.vercel.app"
+npm run smoke-test
+```
+
+Then verify each frontend project opens its role login route, can authenticate against the shared API, and cannot access another role's dashboard.
+
 ## License
 
 MIT

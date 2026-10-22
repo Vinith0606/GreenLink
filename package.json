@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "dev:server": "node server/index.js",
-    "dev:all": "concurrently \"npm run dev\" \"npm run dev:server\""
+    "dev:all": "concurrently \"npm run dev\" \"npm run dev:server\"",
+    "start": "node server/index.js",
+    "smoke-test": "node scripts/smoke-test.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",
