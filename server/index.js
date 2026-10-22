@@ -38,7 +38,8 @@ if (process.env.NODE_ENV === 'production' && !process.env.ADMIN_PASSWORD) {
 }
 
 const app = express()
-const db = new sqlite3.Database(DB_PATH)  
+await fs.mkdir(path.dirname(DB_PATH), { recursive: true })
+const db = new sqlite3.Database(DB_PATH)
 const allowedRoles = ['farmer', 'consumer', 'delivery', 'admin']
 const addressLabels = new Set(['Home', 'Work', 'Other'])
 const transactionContext = new AsyncLocalStorage()
