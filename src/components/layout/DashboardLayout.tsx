@@ -7,6 +7,7 @@ import { Navbar } from './Navbar'
 import { Breadcrumb } from '@/components/common/Breadcrumb'
 import { FloatingChatButton } from '@/components/common/FloatingChatButton'
 import { useAuth } from '@/context/AppContext'
+import { getConfiguredRole, roleHome } from '@/config/app'
 
 interface DashboardLayoutProps {
   showSearch?: boolean
@@ -20,14 +21,10 @@ export function DashboardLayout({ showSearch = true, showChat = true }: Dashboar
   useTranslation()
 
   const routeRole = location.pathname.split('/')[1]
-  const roleHome = {
-    farmer: '/farmer/dashboard',
-    consumer: '/consumer/home',
-    delivery: '/delivery/dashboard',
-    admin: '/admin/dashboard',
-  } as const
+  const appRole = getConfiguredRole()
 
   if (!isAuthenticated) return <Navigate to="/" replace />
+  if (appRole && role !== appRole) return <Navigate to={`/login/${appRole}`} replace />
   if (role !== routeRole) return <Navigate to={role ? roleHome[role] : '/'} replace />
 
   return (

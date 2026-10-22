@@ -405,9 +405,37 @@ npm run dev:server
 Before using this in a production environment:
 
 - configure unique `ADMIN_PASSWORD` and `GREENLINK_AUTH_SECRET` values
+- configure `GREENLINK_ALLOWED_ORIGINS` as a comma-separated list of the deployed frontend origins
 - use HTTPS and proper hosting
 - consider a stronger database system for large-scale deployment
 - back up SQLite data regularly
+
+### Separate frontend deployments
+
+The same frontend can be deployed four times while sharing one backend and database. Set these variables independently for each frontend deployment:
+
+```text
+VITE_API_URL=https://api.greenlink.com/api
+VITE_APP_ROLE=farmer
+```
+
+Use `farmer`, `consumer`, `delivery`, or `admin` for `VITE_APP_ROLE`. The value limits the deployment to that role and redirects its root URL to the corresponding login page. Leave it empty for a public landing-page deployment.
+
+Recommended domains:
+
+- `https://farmer.greenlink.com`
+- `https://consumer.greenlink.com`
+- `https://delivery.greenlink.com`
+- `https://admin.greenlink.com`
+- `https://api.greenlink.com`
+
+Configure the backend with:
+
+```text
+GREENLINK_ALLOWED_ORIGINS=https://farmer.greenlink.com,https://consumer.greenlink.com,https://delivery.greenlink.com,https://admin.greenlink.com
+```
+
+The backend health check is available at `GET /api/health`. The same configured origins are used for REST requests and Socket.IO connections.
 
 ## License
 

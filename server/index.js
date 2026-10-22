@@ -14,6 +14,13 @@ const __dirname = path.dirname(__filename)
 const PORT = Number(process.env.PORT || 3001)
 const DB_PATH = process.env.GREENLINK_DB_PATH || path.join(__dirname, 'greenlink.sqlite')
 const CERTIFICATE_IMAGE_DIR = path.join(__dirname, 'certificates')
+const configuredOrigins = String(process.env.GREENLINK_ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean)
+const allowedOrigins = configuredOrigins.length
+  ? configuredOrigins
+  : ['http://localhost:5173', 'http://localhost:4173']
 const DEFAULT_ADMIN = {
   role: 'admin',
   name: 'Platform Admin',
@@ -675,7 +682,14 @@ const getSafeUser = (user) => ({
   createdAt: user.created_at ?? user.createdAt,
 })
 
-app.use(cors())
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true)
+    return callback(new Error('Origin is not allowed by GreenLink CORS policy.'))
+  },
+}
+
+app.use(cors(corsOptions))
 app.use(express.json({ limit: '8mb' }))
 
 // Return JSON for invalid JSON request bodies instead of HTML error pages
@@ -2068,7 +2082,7 @@ await exportCertificateImages()
 
 // Create HTTP server and attach Socket.IO
 const httpServer = http.createServer(app)
-const io = new IOServer(httpServer, { cors: { origin: '*' } })
+const io = new IOServer(httpServer, { cors: corsOptions })
 
 io.use(async (socket, next) => {
   try {

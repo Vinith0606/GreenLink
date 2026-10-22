@@ -1,7 +1,7 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom'
-import Landing from '@/pages/Landing'
 import Login from '@/pages/Login'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
+import { RoleEntry } from '@/config/app'
 
 /* Farmer */
 import FarmerDashboard from '@/pages/farmer/Dashboard'
@@ -62,7 +62,7 @@ import AdminComplaints from '@/pages/admin/Complaints'
 import HelpSupport from '@/pages/shared/HelpSupport'
 
 export const router = createBrowserRouter([
-  { path: '/', element: <Landing /> },
+  { path: '/', element: <RoleEntry /> },
   { path: '/login/:role', element: <Login /> },
   { path: '/signup/:role', element: <Login /> },
 

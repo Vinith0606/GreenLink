@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/Input'
 import { Card } from '@/components/ui/Card'
 import api, { endpoints } from '@/services/api'
 import { requestCurrentLocation, reverseGeocode } from '@/utils/locationService'
+import { getConfiguredRole } from '@/config/app'
 
 const roleRoutes: Record<UserRole, string> = {
   farmer: '/farmer/dashboard',
@@ -39,6 +40,7 @@ export default function Login() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { login } = useAuth()
+  const appRole = getConfiguredRole()
   const [mode, setMode] = useState<'signin' | 'signup'>(location.pathname.startsWith('/signup/') ? 'signup' : 'signin')
   const [errorMessage, setErrorMessage] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -48,6 +50,10 @@ export default function Login() {
 
   if (!role || !roleRoutes[role as UserRole]) {
     navigate('/')
+    return null
+  }
+  if (appRole && role !== appRole) {
+    navigate(`/login/${appRole}`, { replace: true })
     return null
   }
 
