@@ -616,11 +616,8 @@ const initializeDatabase = async () => {
       `INSERT INTO users (role, name, email, phone, password) VALUES (?, ?, ?, ?, ?)`,
       [DEFAULT_ADMIN.role, DEFAULT_ADMIN.name, DEFAULT_ADMIN.email, DEFAULT_ADMIN.phone, hashPassword(DEFAULT_ADMIN.password)]
     )
-  } else {
-    const seededPasswordHash = crypto.createHash('sha256').update('admin123').digest('hex')
-    if (adminExists.password === seededPasswordHash) {
-      await run('UPDATE users SET password = ? WHERE id = ?', [hashPassword(DEFAULT_ADMIN.password), adminExists.id])
-    }
+  } else if (!verifyPassword(DEFAULT_ADMIN.password, adminExists.password) || !String(adminExists.password).startsWith('scrypt$')) {
+    await run('UPDATE users SET password = ? WHERE id = ?', [hashPassword(DEFAULT_ADMIN.password), adminExists.id])
   }
 }
 
