@@ -37,9 +37,23 @@ export default function FarmerCertificate() {
       ? lines[nameLineIndex].replace(/^(?:farmer|holder|applicant|name)\s*[:#-]?\s*/i, '').trim()
       : ''
     const nameAfterCertification = certificationLineIndex >= 0
-      ? lines.slice(certificationLineIndex + 1).find((line) => line.length > 2 && !/^(?:d\/o|s\/o|w\/o|address|at|pin)\b/i.test(line)) || ''
+      ? lines.slice(certificationLineIndex + 1).find((line) => !/^(?:d\/o|s\/o|w\/o|address|at|pin)\b/i.test(line)) || ''
       : ''
-    const name = labelledName || nameAfterCertification
+    const normalizeName = (value: string) => value.toLowerCase().replace(/[^a-z]/g, '')
+    const expectedName = normalizeName(userName)
+    const nameCandidates = [labelledName, nameAfterCertification, ...lines]
+      .map((candidate) => candidate.replace(/^(?:farmer|holder|applicant|name)\s*[:#-]?\s*/i, '').trim())
+      .filter((candidate, index, candidates) => candidate.length > 0 && candidates.indexOf(candidate) === index)
+      .filter((candidate) => {
+        const letters = candidate.match(/[a-z]/gi)?.length || 0
+        const characters = candidate.replace(/\s/g, '').length
+        return letters >= 3 && characters > 0 && letters / characters >= 0.6
+          && !/^(?:this is to certify|certificate|registration|address|date|valid|farmer name|name)\b/i.test(candidate)
+      })
+    const name = nameCandidates.find((candidate) => {
+      const normalizedCandidate = normalizeName(candidate)
+      return expectedName.length >= 3 && normalizedCandidate.includes(expectedName)
+    }) || nameCandidates[0] || ''
     const idMatch = text.match(/(?:certificate\s*(?:no|number|id)|cert(?:ificate)?\s*id|registration\s*(?:no|number|id)?)\s*\.?\s*[:#-]\s*([A-Z0-9][A-Z0-9./-]{3,})/i)
     const standaloneIdMatch = text.match(/\b(?:TC|CERT|REG)[-\s]?[A-Z0-9./-]{3,}\b/i)
     const certificateId = (idMatch?.[1] || standaloneIdMatch?.[0] || '').replace(/\s+/g, '').replace(/[.,:;]+$/, '')
@@ -75,15 +89,17 @@ export default function FarmerCertificate() {
       const dataUrl = String(reader.result || '')
       setFile(dataUrl)
       setExtracting(true)
+      setExtractedName('')
       setError('')
+      let worker: Awaited<ReturnType<typeof createWorker>> | undefined
       try {
-        const worker = await createWorker('eng')
+        worker = await createWorker('eng')
         const result = await worker.recognize(dataUrl)
-        await worker.terminate()
         extractCertificateFields(result.data.text)
       } catch {
         setError('Unable to read this certificate. Please upload a clearer image.')
       } finally {
+        await worker?.terminate()
         setExtracting(false)
       }
     }
@@ -144,7 +160,10 @@ export default function FarmerCertificate() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 mt-4">
-          <Input label="Farmer name *" value={farmerName} onChange={(event) => setFarmerName(event.target.value)} />
+          <div>
+            <Input label="Farmer name on certificate *" value={farmerName} onChange={(event) => { setFarmerName(event.target.value); setExtractedName(event.target.value.trim()); setError('') }} />
+            <p className="mt-1 text-xs text-muted">Check or correct the OCR result. The name must match your signed-in account.</p>
+          </div>
           <Input label="Certificate number *" value={certificateNumber} onChange={(event) => setCertificateNumber(event.target.value)} />
           <Input label="Certificate type" value={type} onChange={(event) => setType(event.target.value)} />
           <Input label="Expiry date (optional)" type="date" value={expiryDate} onChange={(event) => setExpiryDate(event.target.value)} />
