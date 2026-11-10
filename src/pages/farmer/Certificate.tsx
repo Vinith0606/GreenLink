@@ -125,13 +125,15 @@ export default function FarmerCertificate() {
         ocr_text: ocrText,
         extracted_name: extractedName,
         extracted_certificate_number: extractedCertificateNumber,
-      })
+      }, { timeout: 60000 })
       setCertificate(response.data.certificate)
       updateProfile(userName, { certificateStatus: response.data.certificate?.status || 'pending' })
       setFile('')
       toast(t('toast.certUploaded'), 'success')
     } catch (uploadError: any) {
-      setError(uploadError?.response?.data?.message || 'Unable to upload certificate right now.')
+      setError(uploadError?.response?.data?.message || (uploadError?.code === 'ECONNABORTED'
+        ? 'Certificate upload timed out. Please retry with a smaller or clearer image.'
+        : 'Unable to upload certificate right now. Please check your connection and try again.'))
     } finally {
       setUploading(false)
     }
