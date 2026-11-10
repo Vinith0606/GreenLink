@@ -37,6 +37,8 @@ export default function AdminFarmerDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [farmer, setFarmer] = useState<Farmer | null>(null)
+  const [certificateImageUrl, setCertificateImageUrl] = useState('')
+  const [certificateImageError, setCertificateImageError] = useState('')
   const [loading, setLoading] = useState(true)
   const [reviewing, setReviewing] = useState(false)
   const [error, setError] = useState('')
@@ -46,20 +48,36 @@ export default function AdminFarmerDetail() {
       const response = await api.get(endpoints.admin.users)
       const match = (response.data.users || []).find((user: any) => String(user.id) === String(id) && user.role === 'farmer')
       if (match) {
-        console.log('Farmer matched:', { id: match.id, address: match.address, city: match.city, description: match.description, farmName: match.farmName })
         setFarmer(match as Farmer)
+        if (match.certificateId) {
+          const imageResponse = await api.get(`/certificates/${match.certificateId}/image`, { responseType: 'blob' })
+          setCertificateImageUrl((currentUrl) => {
+            if (currentUrl) URL.revokeObjectURL(currentUrl)
+            return URL.createObjectURL(imageResponse.data)
+          })
+          setCertificateImageError('')
+        } else {
+          setCertificateImageUrl((currentUrl) => {
+            if (currentUrl) URL.revokeObjectURL(currentUrl)
+            return ''
+          })
+        }
       } else {
         setFarmer(null)
       }
     } catch (err) {
       console.error('Load farmer error:', err)
-      setError('Unable to load farmer details right now.')
+      setCertificateImageError('Unable to load the certificate image.')
+      if (!farmer) setError('Unable to load farmer details right now.')
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => { loadFarmer() }, [id])
+  useEffect(() => () => {
+    if (certificateImageUrl) URL.revokeObjectURL(certificateImageUrl)
+  }, [certificateImageUrl])
 
   const reviewCertificate = async (status: 'verified' | 'rejected') => {
     if (!farmer?.certificateId) return
@@ -86,7 +104,7 @@ export default function AdminFarmerDetail() {
 
       <Card><div className="flex flex-col items-center gap-5 sm:flex-row"><div>{farmer.avatar ? <img src={farmer.avatar} alt={farmer.name} className="h-28 w-28 rounded-full border-2 border-primary object-cover" /> : <div className="flex h-28 w-28 items-center justify-center rounded-full gradient-primary text-4xl font-bold text-background">{farmer.name.charAt(0)}</div>}</div><div className="space-y-3"><h2 className="text-xl font-semibold">{farmer.name}</h2><p className="flex items-center gap-2 text-sm text-muted"><Phone className="h-4 w-4 text-primary" />{farmer.phone || 'Mobile number not provided'}</p><p className="flex items-center gap-2 text-sm text-muted"><Mail className="h-4 w-4 text-primary" />{farmer.email || 'Email not provided'}</p></div></div></Card>
 
-      <div className="grid gap-6 md:grid-cols-2"><Card><h2 className="mb-4 font-semibold">Farm details</h2><dl className="space-y-4 text-sm"><div><dt className="text-muted">Farm name</dt><dd className="mt-1 font-medium">{farmer.farmName || 'Not provided'}</dd></div><div><dt className="text-muted">Description</dt><dd className="mt-1 whitespace-pre-wrap text-foreground">{farmer.description || 'Not provided'}</dd></div><div><dt className="text-muted">Address</dt><dd className="mt-1 flex items-start gap-2 font-medium"><MapPin className="mt-0.5 h-4 w-4 shrink-0 text-primary" />{farmer.address || 'Not provided'}</dd></div><div><dt className="text-muted">City</dt><dd className="mt-1 font-medium">{farmer.city || 'Not provided'}</dd></div></dl></Card><Card><h2 className="mb-4 font-semibold">Certificate status</h2><div className="space-y-3"><Badge variant={certificateVariant(status)}><ShieldCheck className="h-4 w-4" /> {status}</Badge>{farmer.certificateId ? <><p className="text-sm"><span className="text-muted">Type:</span> {farmer.certificateType || 'Certificate'}</p>{farmer.certificateDownloadUrl && <a href={farmer.certificateDownloadUrl} className="inline-flex items-center gap-2 text-sm text-primary hover:underline"><ExternalLink className="h-4 w-4" /> Download certificate</a>}{status !== 'verified' && <div className="flex flex-wrap gap-2 pt-2"><Button size="sm" loading={reviewing} onClick={() => reviewCertificate('verified')}><CheckCircle className="h-4 w-4" /> Approve</Button><Button size="sm" variant="danger" loading={reviewing} onClick={() => reviewCertificate('rejected')}><Ban className="h-4 w-4" /> Reject</Button></div>}</> : <p className="text-sm text-muted">No certificate uploaded yet.</p>}</div></Card></div>
+      <div className="grid gap-6 md:grid-cols-2"><Card><h2 className="mb-4 font-semibold">Farm details</h2><dl className="space-y-4 text-sm"><div><dt className="text-muted">Farm name</dt><dd className="mt-1 font-medium">{farmer.farmName || 'Not provided'}</dd></div><div><dt className="text-muted">Description</dt><dd className="mt-1 whitespace-pre-wrap text-foreground">{farmer.description || 'Not provided'}</dd></div><div><dt className="text-muted">Address</dt><dd className="mt-1 flex items-start gap-2 font-medium"><MapPin className="mt-0.5 h-4 w-4 shrink-0 text-primary" />{farmer.address || 'Not provided'}</dd></div><div><dt className="text-muted">City</dt><dd className="mt-1 font-medium">{farmer.city || 'Not provided'}</dd></div></dl></Card><Card><h2 className="mb-4 font-semibold">Certificate status</h2><div className="space-y-3"><Badge variant={certificateVariant(status)}><ShieldCheck className="h-4 w-4" /> {status}</Badge>{farmer.certificateId ? <><p className="text-sm"><span className="text-muted">Type:</span> {farmer.certificateType || 'Certificate'}</p>{certificateImageUrl && <img src={certificateImageUrl} alt={`${farmer.name}'s certificate`} className="max-h-96 w-full rounded-xl border border-border object-contain bg-surface-elevated" />}{certificateImageError && <p className="text-sm text-danger">{certificateImageError}</p>}{certificateImageUrl && <a href={certificateImageUrl} download={`certificate-${farmer.certificateId}`} className="inline-flex items-center gap-2 text-sm text-primary hover:underline"><ExternalLink className="h-4 w-4" /> Download certificate</a>}{status !== 'verified' && <div className="flex flex-wrap gap-2 pt-2"><Button size="sm" loading={reviewing} onClick={() => reviewCertificate('verified')}><CheckCircle className="h-4 w-4" /> Approve</Button><Button size="sm" variant="danger" loading={reviewing} onClick={() => reviewCertificate('rejected')}><Ban className="h-4 w-4" /> Reject</Button></div>}</> : <p className="text-sm text-muted">No certificate uploaded yet.</p>}</div></Card></div>
       {error && <p className="text-sm text-danger">{error}</p>}
     </div>
   )

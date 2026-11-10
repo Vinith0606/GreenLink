@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
-import { Search, Ban, CheckCircle, Users, ExternalLink } from 'lucide-react'
+import { Search, Ban, CheckCircle, Users } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
@@ -100,7 +100,6 @@ export default function AdminFarmers() {
                         <Badge variant={user.certificateReviewStatus === 'verified' ? 'success' : user.certificateReviewStatus === 'rejected' ? 'danger' : 'warning'}>
                           {user.certificateReviewStatus || 'pending'}
                         </Badge>
-                          {user.certificateDownloadUrl && <a href={user.certificateDownloadUrl} title="Download certificate" className="text-primary"><ExternalLink className="w-4 h-4" /></a>}
                       </div>
                     ) : <span className="text-muted">Not uploaded</span>}
                   </td>
